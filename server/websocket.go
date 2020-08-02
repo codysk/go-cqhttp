@@ -171,7 +171,11 @@ func (c *websocketClient) listenApi(conn *wsc.Conn, u bool) {
 				ret["echo"] = j.Get("echo").Value()
 			}
 			c.pushLock.Lock()
-			_, _ = conn.Write([]byte(ret.ToJson()))
+			log.Debugf("返回结果: %v", ret.ToJson())
+			_, err = conn.Write([]byte(ret.ToJson()))
+			if err != nil {
+				log.Error(err)
+			}
 			c.pushLock.Unlock()
 		}
 	}

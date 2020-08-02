@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/Mrs4s/MiraiGo/client"
@@ -12,34 +12,31 @@ import (
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 	log "github.com/sirupsen/logrus"
 	easy "github.com/t-tomalak/logrus-easy-formatter"
-	asciiart "github.com/yinghau76/go-ascii-art"
-	"image"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/signal"
 	"path"
-	"strconv"
 	"strings"
 	"time"
 )
 
 func init() {
+	if !global.PathExists(global.Datadir) {
+		if err := os.Mkdir(global.Datadir, 0777); err != nil {
+			log.Fatalf("创建数据文件夹失败: %v", err)
+		}
+		if err := os.Mkdir(path.Join(global.Datadir, "images"), 0777); err != nil {
+			log.Fatalf("创建图片缓存文件夹失败: %v", err)
+		}
+	}
 	log.SetFormatter(&easy.Formatter{
 		TimestampFormat: "2006-01-02 15:04:05",
 		LogFormat:       "[%time%] [%lvl%]: %msg% \n",
 	})
-	w, err := rotatelogs.New(path.Join("logs", "%Y-%m-%d.log"), rotatelogs.WithRotationTime(time.Hour*24))
+	w, err := rotatelogs.New(path.Join(global.LogPath, "%Y-%m-%d.log"), rotatelogs.WithRotationTime(time.Hour*24))
 	if err == nil {
 		log.SetOutput(io.MultiWriter(os.Stderr, w))
-	}
-	if !global.PathExists("data") {
-		if err := os.Mkdir("data", 0777); err != nil {
-			log.Fatalf("创建数据文件夹失败: %v", err)
-		}
-		if err := os.Mkdir(path.Join("data", "images"), 0777); err != nil {
-			log.Fatalf("创建图片缓存文件夹失败: %v", err)
-		}
 	}
 	if global.PathExists("cqhttp.json") {
 		log.Info("发现 cqhttp.json 将在五秒后尝试导入配置，按 Ctrl+C 取消.")
@@ -65,7 +62,7 @@ func init() {
 			goConf.ReverseServers[0].ReverseEventUrl = conf.WSReverseEventUrl
 			goConf.ReverseServers[0].ReverseReconnectInterval = conf.WSReverseReconnectInterval
 		}
-		if err := goConf.Save("config.json"); err != nil {
+		if err := goConf.Save(global.ConfigPath); err != nil {
 			log.Fatalf("保存 config.json 时出现错误: %v", err)
 		}
 		_ = os.Remove("cqhttp.json")
@@ -75,35 +72,11 @@ func init() {
 func main() {
 	console := bufio.NewReader(os.Stdin)
 	var conf *global.JsonConfig
-	if global.PathExists("config.json") || os.Getenv("UIN") == "" {
-		conf = global.Load("config.json")
-	} else if os.Getenv("UIN") != "" {
-		log.Infof("将从环境变量加载配置.")
-		uin, _ := strconv.ParseInt(os.Getenv("UIN"), 10, 64)
-		pwd := os.Getenv("PASS")
-		post := os.Getenv("HTTP_POST")
-		conf = &global.JsonConfig{
-			Uin:      uin,
-			Password: pwd,
-			HttpConfig: &global.GoCQHttpConfig{
-				Enabled:  true,
-				Host:     "0.0.0.0",
-				Port:     5700,
-				PostUrls: map[string]string{},
-			},
-			WSConfig: &global.GoCQWebsocketConfig{
-				Enabled: true,
-				Host:    "0.0.0.0",
-				Port:    6700,
-			},
-			Debug: os.Getenv("DEBUG") == "true",
-		}
-		if post != "" {
-			conf.HttpConfig.PostUrls[post] = os.Getenv("HTTP_SECRET")
-		}
+	if global.PathExists(global.ConfigPath) {
+		conf = global.Load(global.ConfigPath)
 	}
 	if conf == nil {
-		err := global.DefaultConfig().Save("config.json")
+		err := global.DefaultConfig().Save(global.ConfigPath)
 		if err != nil {
 			log.Fatalf("创建默认配置文件时出现错误: %v", err)
 			return
@@ -121,14 +94,14 @@ func main() {
 		log.SetLevel(log.DebugLevel)
 		log.Warnf("已开启Debug模式.")
 	}
-	if !global.PathExists("device.json") {
+	if !global.PathExists(global.DevicePath) {
 		log.Warn("虚拟设备信息不存在, 将自动生成随机设备.")
 		client.GenRandomDevice()
-		_ = ioutil.WriteFile("device.json", client.SystemDeviceInfo.ToJson(), 0777)
+		_ = ioutil.WriteFile(global.DevicePath, client.SystemDeviceInfo.ToJson(), 0777)
 		log.Info("已生成设备信息并保存到 device.json 文件.")
 	} else {
 		log.Info("将使用 device.json 内的设备信息运行Bot.")
-		if err := client.SystemDeviceInfo.ReadJson([]byte(global.ReadAllText("device.json"))); err != nil {
+		if err := client.SystemDeviceInfo.ReadJson([]byte(global.ReadAllText(global.DevicePath))); err != nil {
 			log.Fatalf("加载设备信息失败: %v", err)
 		}
 	}
@@ -142,8 +115,9 @@ func main() {
 		if !rsp.Success {
 			switch rsp.Error {
 			case client.NeedCaptcha:
-				img, _, _ := image.Decode(bytes.NewReader(rsp.CaptchaImage))
-				fmt.Println(asciiart.New("image", img).Art)
+				base64Image := base64.StdEncoding.EncodeToString(rsp.CaptchaImage)
+				log.Warnf("请前往 -> https://codysk.github.io/static-file/image.html#%v <- 获取验证码", base64Image)
+
 				log.Warn("请输入验证码： (回车提交)")
 				text, _ := console.ReadString('\n')
 				rsp, err = cli.SubmitCaptcha(strings.ReplaceAll(text, "\n", ""), rsp.CaptchaSign)
