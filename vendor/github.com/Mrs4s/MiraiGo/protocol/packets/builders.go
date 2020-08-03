@@ -8,7 +8,7 @@ import (
 func BuildLoginPacket(uin int64, bodyType byte, key, body, extraData []byte) []byte {
 	w := binary.NewWriter()
 	w.WriteIntLvPacket(4, func(w *binary.Writer) {
-		w.WriteUInt32(0x0A)
+		w.WriteUInt32(0x00_00_00_0A)
 		w.WriteByte(bodyType)
 		w.WriteIntLvPacket(4, func(w *binary.Writer) {
 			w.Write(extraData)

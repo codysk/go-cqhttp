@@ -120,7 +120,7 @@ func valToStr(v reflect.Value, sf reflect.StructField) string {
 		return timeToStr(v, sf)
 	}
 
-	if v.IsNil() {
+	if v.IsZero() {
 		return ""
 	}
 
